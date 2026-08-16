@@ -41,6 +41,7 @@ print(result.vehicle.engine)         # "2.8L"
 print(result.vehicle.description)    # "TOYOTA HILUX UTILITY 2.8L"
 print(result.duration_ms)            # 2451.3
 print(result.source)                 # data source identifier
+print(result.request_id)             # "req_7f3a9c1b4e..." (include when contacting support)
 ```
 
 Valid states: `NSW`, `VIC`, `QLD`, `SA`, `WA`, `TAS`, `NT`, `ACT`.
@@ -135,7 +136,7 @@ page2 = client.logs(limit=50, offset=50)
 
 ### Log entry fields
 
-Each `LogEntry` contains: `plate`, `state`, `success` (1 or 0), `error`, `duration_ms`, `make`, `model`, `year`, `client_ip`, `created_at`.
+Each `LogEntry` contains: `plate`, `state`, `success` (1 or 0), `error`, `duration_ms`, `make`, `model`, `year`, `client_ip`, `request_id`, `created_at`.
 
 ## Health check
 

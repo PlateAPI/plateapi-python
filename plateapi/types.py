@@ -34,6 +34,7 @@ class LookupResult:
     sandbox: bool = False
     code: Optional[str] = None
     error: Optional[str] = None
+    request_id: Optional[str] = None
     rate_limit: Optional[RateLimit] = None
 
 
@@ -59,6 +60,7 @@ class LogEntry:
     model: Optional[str] = None
     year: Optional[int] = None
     client_ip: Optional[str] = None
+    request_id: Optional[str] = None
     created_at: Optional[str] = None
 
 

@@ -193,6 +193,7 @@ class PlateAPI:
             sandbox=body.get("sandbox", False),
             code=body.get("code"),
             error=body.get("error"),
+            request_id=body.get("request_id"),
             rate_limit=rate_limit,
         )
 
@@ -266,6 +267,7 @@ class PlateAPI:
                 model=entry.get("model"),
                 year=entry.get("year"),
                 client_ip=entry.get("client_ip"),
+                request_id=entry.get("request_id"),
                 created_at=entry.get("created_at"),
             ))
 
