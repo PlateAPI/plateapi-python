@@ -7,7 +7,7 @@ from .errors import (
     NotFoundError,
     ServerError,
 )
-from .types import Vehicle, LookupResult, RateLimit, Usage, HealthStatus
+from .types import Vehicle, LookupResult, RateLimit, Usage, HealthStatus, LogEntry, LogsResult, RotateResult
 
 __version__ = "0.1.0"
 __all__ = [
@@ -23,4 +23,7 @@ __all__ = [
     "RateLimit",
     "Usage",
     "HealthStatus",
+    "LogEntry",
+    "LogsResult",
+    "RotateResult",
 ]

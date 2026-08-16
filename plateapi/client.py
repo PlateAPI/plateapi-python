@@ -12,7 +12,7 @@ from .errors import (
     NotFoundError,
     ServerError,
 )
-from .types import Vehicle, RateLimit, LookupResult, Usage, HealthStatus
+from .types import Vehicle, RateLimit, LookupResult, Usage, HealthStatus, LogEntry, LogsResult, RotateResult
 
 VALID_STATES = {"NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT"}
 DEFAULT_BASE_URL = "https://api.plateapi.com.au"
@@ -230,6 +230,59 @@ class PlateAPI:
             period_start=body.get("period_start"),
             period_end=body.get("period_end"),
             topup_credits=body.get("topup_credits", 0),
+        )
+
+    def logs(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        since: str = None,
+        until: str = None,
+        plate: str = None,
+        success: bool = None,
+    ) -> LogsResult:
+        params = {"limit": str(limit), "offset": str(offset)}
+        if since:
+            params["since"] = since
+        if until:
+            params["until"] = until
+        if plate:
+            params["plate"] = plate
+        if success is not None:
+            params["success"] = str(success).lower()
+
+        response = self._request("GET", "/api/v1/keys/logs", params=params)
+        body = response.json()
+
+        entries = []
+        for entry in body.get("logs", []):
+            entries.append(LogEntry(
+                plate=entry.get("plate"),
+                state=entry.get("state"),
+                success=entry.get("success", 0),
+                error=entry.get("error"),
+                duration_ms=entry.get("duration_ms"),
+                make=entry.get("make"),
+                model=entry.get("model"),
+                year=entry.get("year"),
+                client_ip=entry.get("client_ip"),
+                created_at=entry.get("created_at"),
+            ))
+
+        return LogsResult(
+            logs=entries,
+            count=body.get("count", 0),
+            total=body.get("total", 0),
+            limit=body.get("limit", limit),
+            offset=body.get("offset", offset),
+        )
+
+    def rotate(self) -> RotateResult:
+        response = self._request("POST", "/api/v1/keys/rotate")
+        body = response.json()
+        return RotateResult(
+            new_key=body.get("new_key"),
+            email=body.get("email"),
         )
 
     def health(self) -> HealthStatus:

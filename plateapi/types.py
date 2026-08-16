@@ -49,6 +49,35 @@ class Usage:
 
 
 @dataclass
+class LogEntry:
+    plate: Optional[str] = None
+    state: Optional[str] = None
+    success: int = 0
+    error: Optional[str] = None
+    duration_ms: Optional[float] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    year: Optional[int] = None
+    client_ip: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+@dataclass
+class LogsResult:
+    logs: List["LogEntry"] = field(default_factory=list)
+    count: int = 0
+    total: int = 0
+    limit: int = 100
+    offset: int = 0
+
+
+@dataclass
+class RotateResult:
+    new_key: Optional[str] = None
+    email: Optional[str] = None
+
+
+@dataclass
 class HealthStatus:
     status: str = "unknown"
     version: Optional[str] = None
