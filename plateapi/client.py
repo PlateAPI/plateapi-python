@@ -12,7 +12,7 @@ from .errors import (
     NotFoundError,
     ServerError,
 )
-from .types import Vehicle, RateLimit, LookupResult, Usage, HealthStatus, LogEntry, LogsResult
+from .types import Vehicle, RateLimit, LookupResult, VehiclesResult, Usage, HealthStatus, LogEntry, LogsResult
 
 VALID_STATES = {"NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT"}
 DEFAULT_BASE_URL = "https://api.plateapi.com.au"
@@ -204,32 +204,52 @@ class PlateAPI:
         year: int = None,
         series: str = None,
         engine: str = None,
-    ) -> List[str]:
+        variant: str = None,
+    ) -> VehiclesResult:
         params = {}
-        if make:
+        if make is not None:
             params["make"] = make
-        if model:
+        if model is not None:
             params["model"] = model
-        if year:
+        if year is not None:
             params["year"] = str(year)
-        if series:
+        if series is not None:
             params["series"] = series
-        if engine:
+        if engine is not None:
             params["engine"] = engine
+        if variant is not None:
+            params["variant"] = variant
 
         response = self._request("GET", "/api/v1/vehicles", params=params)
-        return response.json()
+        body = response.json()
+        data_list = body.get("data", [])
+        items = data_list[0].get("data", []) if data_list else []
+        cascade_type = data_list[0].get("type") if data_list else None
+        return VehiclesResult(
+            success=body.get("success", False),
+            type=cascade_type,
+            data=items,
+            total=body.get("total", 0),
+            duration_ms=body.get("duration_ms"),
+        )
 
     def usage(self) -> Usage:
         response = self._request("GET", "/api/v1/keys/usage")
         body = response.json()
         return Usage(
-            used=body.get("used", 0),
-            limit=body.get("limit", 0),
-            remaining=body.get("remaining", 0),
+            email=body.get("email"),
             plan=body.get("plan"),
+            monthly_limit=body.get("monthly_limit", 0),
+            used_this_month=body.get("used_this_month", 0),
+            remaining=body.get("remaining", 0),
+            percent_used=body.get("percent_used"),
+            rate_limit_per_min=body.get("rate_limit_per_min", 0),
+            last_lookup_at=body.get("last_lookup_at"),
             period_start=body.get("period_start"),
             period_end=body.get("period_end"),
+            days_remaining=body.get("days_remaining"),
+            cancel_at_period_end=body.get("cancel_at_period_end", False),
+            cancel_at=body.get("cancel_at"),
             topup_credits=body.get("topup_credits", 0),
         )
 

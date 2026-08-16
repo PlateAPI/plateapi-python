@@ -70,34 +70,72 @@ if result.alternatives:
 
 ## Vehicle database
 
-Browse the full vehicle database (32,000+ vehicles, 213 makes). Each call narrows the cascade -- call with no arguments to get all makes, then pass `make` to get models, and so on. Paid plans only, no quota consumed.
+Browse the full vehicle database (32,000+ vehicles, 213 makes). Each call narrows the cascade -- call with no arguments to get all makes, then pass `make` to get models, and so on through all 7 levels. Paid plans only, no quota consumed.
+
+Returns a `VehiclesResult` with `success`, `type` (the cascade level), `data` (list of values), `total`, and `duration_ms`.
 
 ```python
-# All makes
-makes = client.vehicles()
-print(makes[:5])  # ["ABARTH", "AC", "ALFA ROMEO", ...]
+# Step 1: All makes
+result = client.vehicles()
+print(result.type)    # "make"
+print(result.data[:5])  # ["ABARTH", "AC", "ALFA ROMEO", ...]
+print(result.total)   # 213
 
-# Models for a make
-models = client.vehicles(make="TOYOTA")
-print(models[:5])  # ["86", "ALPHARD", "AURION", ...]
+# Step 2: Models for a make
+result = client.vehicles(make="TOYOTA")
+print(result.type)    # "model"
+print(result.data[:5])  # ["86", "ALPHARD", "AURION", ...]
 
-# Years for a make + model
-years = client.vehicles(make="TOYOTA", model="HILUX")
+# Step 3: Years for a make + model
+result = client.vehicles(make="TOYOTA", model="HILUX")
+print(result.type)    # "year"
+print(result.data[:5])  # [2025, 2024, 2023, ...]
 
-# Full cascade with series and engine
-series = client.vehicles(make="TOYOTA", model="HILUX", year=2020)
-engines = client.vehicles(make="TOYOTA", model="HILUX", year=2020, series="SR5")
+# Step 4: Series for a make + model + year
+result = client.vehicles(make="TOYOTA", model="HILUX", year=2020)
+print(result.type)    # "series"
+print(result.data)    # ["SR", "SR5", "Rogue", "Rugged", ...]
+
+# Step 5: Engines for a make + model + year + series
+result = client.vehicles(make="TOYOTA", model="HILUX", year=2020, series="SR5")
+print(result.type)    # "engine"
+print(result.data)    # ["2.8L", "2.4L", ...]
+
+# Step 6: Variants for a make + model + year + series + engine
+result = client.vehicles(make="TOYOTA", model="HILUX", year=2020, series="SR5", engine="2.8L")
+print(result.type)    # "variant"
+print(result.data)    # ["4x4 Double Cab", "4x4 Extra Cab", ...]
+
+# Step 7: Full vehicle details
+result = client.vehicles(
+    make="TOYOTA", model="HILUX", year=2020, series="SR5",
+    engine="2.8L", variant="4x4 Double Cab",
+)
+print(result.type)    # "vehicle"
+print(result.data)    # [{"make": "TOYOTA", "model": "HILUX", ...}]
+```
+
+For vehicles without a series code, pass an empty string:
+
+```python
+result = client.vehicles(make="TOYOTA", model="HILUX", year=2020, series="")
 ```
 
 ## Check usage
 
 ```python
 usage = client.usage()
-print(f"{usage.used}/{usage.limit} lookups used")
+print(f"{usage.used_this_month}/{usage.monthly_limit} lookups used")
 print(f"{usage.remaining} remaining")
+print(f"{usage.percent_used}% used")
 print(f"Plan: {usage.plan}")
+print(f"Rate limit: {usage.rate_limit_per_min}/min")
 print(f"Period: {usage.period_start} to {usage.period_end}")
+print(f"Days remaining: {usage.days_remaining}")
+print(f"Last lookup: {usage.last_lookup_at}")
 print(f"Top-up credits: {usage.topup_credits}")
+print(f"Cancel at period end: {usage.cancel_at_period_end}")
+print(f"Cancel at: {usage.cancel_at}")
 ```
 
 ## Request logs

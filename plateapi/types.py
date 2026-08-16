@@ -39,13 +39,29 @@ class LookupResult:
 
 
 @dataclass
+class VehiclesResult:
+    success: bool = False
+    type: Optional[str] = None
+    data: list = field(default_factory=list)
+    total: int = 0
+    duration_ms: Optional[float] = None
+
+
+@dataclass
 class Usage:
-    used: int = 0
-    limit: int = 0
-    remaining: int = 0
+    email: Optional[str] = None
     plan: Optional[str] = None
+    monthly_limit: int = 0
+    used_this_month: int = 0
+    remaining: int = 0
+    percent_used: Optional[float] = None
+    rate_limit_per_min: int = 0
+    last_lookup_at: Optional[str] = None
     period_start: Optional[str] = None
     period_end: Optional[str] = None
+    days_remaining: Optional[int] = None
+    cancel_at_period_end: bool = False
+    cancel_at: Optional[str] = None
     topup_credits: int = 0
 
 
