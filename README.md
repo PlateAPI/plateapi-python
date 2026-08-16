@@ -137,19 +137,6 @@ page2 = client.logs(limit=50, offset=50)
 
 Each `LogEntry` contains: `plate`, `state`, `success` (1 or 0), `error`, `duration_ms`, `make`, `model`, `year`, `client_ip`, `created_at`.
 
-## Rotate API key
-
-Immediately invalidates your current key and returns a new one. Update your configuration with the new key before making further requests.
-
-```python
-result = client.rotate()
-new_key = result.new_key
-print(f"New key: {new_key}")
-
-# Update the client with the new key
-client = PlateAPI(new_key)
-```
-
 ## Health check
 
 Check API availability. No authentication required, no quota consumed.

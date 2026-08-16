@@ -72,12 +72,6 @@ class LogsResult:
 
 
 @dataclass
-class RotateResult:
-    new_key: Optional[str] = None
-    email: Optional[str] = None
-
-
-@dataclass
 class HealthStatus:
     status: str = "unknown"
     version: Optional[str] = None

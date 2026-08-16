@@ -12,7 +12,7 @@ from .errors import (
     NotFoundError,
     ServerError,
 )
-from .types import Vehicle, RateLimit, LookupResult, Usage, HealthStatus, LogEntry, LogsResult, RotateResult
+from .types import Vehicle, RateLimit, LookupResult, Usage, HealthStatus, LogEntry, LogsResult
 
 VALID_STATES = {"NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT"}
 DEFAULT_BASE_URL = "https://api.plateapi.com.au"
@@ -275,14 +275,6 @@ class PlateAPI:
             total=body.get("total", 0),
             limit=body.get("limit", limit),
             offset=body.get("offset", offset),
-        )
-
-    def rotate(self) -> RotateResult:
-        response = self._request("POST", "/api/v1/keys/rotate")
-        body = response.json()
-        return RotateResult(
-            new_key=body.get("new_key"),
-            email=body.get("email"),
         )
 
     def health(self) -> HealthStatus:
