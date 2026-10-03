@@ -1,24 +1,41 @@
+from ._version import __version__
 from .client import PlateAPI
 from .errors import (
-    PlateAPIError,
     AuthenticationError,
-    RateLimitError,
-    QuotaExceededError,
+    BadRequestError,
     NotFoundError,
+    PermissionDeniedError,
+    PlateAPIError,
+    QuotaExceededError,
+    RateLimitError,
     ServerError,
 )
-from .types import Vehicle, LookupResult, VehiclesResult, RateLimit, Usage, HealthStatus, LogEntry, LogsResult
+from .types import (
+    HealthStatus,
+    LogEntry,
+    LogsResult,
+    LookupResult,
+    RateLimit,
+    Usage,
+    Vehicle,
+    VehicleRecord,
+    VehiclesResult,
+    WalkedVehicle,
+)
 
-__version__ = "0.1.0"
 __all__ = [
     "PlateAPI",
     "PlateAPIError",
     "AuthenticationError",
+    "BadRequestError",
+    "PermissionDeniedError",
     "RateLimitError",
     "QuotaExceededError",
     "NotFoundError",
     "ServerError",
     "Vehicle",
+    "VehicleRecord",
+    "WalkedVehicle",
     "LookupResult",
     "VehiclesResult",
     "RateLimit",
@@ -26,4 +43,5 @@ __all__ = [
     "HealthStatus",
     "LogEntry",
     "LogsResult",
+    "__version__",
 ]

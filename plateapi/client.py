@@ -1,27 +1,32 @@
-import time
-import random
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, Iterator, Optional, Set
 
 import requests
 
-from .errors import (
-    PlateAPIError,
-    AuthenticationError,
-    RateLimitError,
-    QuotaExceededError,
-    NotFoundError,
-    ServerError,
+from ._http import Transport, safe_json
+from .types import (
+    HealthStatus,
+    LogEntry,
+    LogsResult,
+    LookupResult,
+    RateLimit,
+    Usage,
+    Vehicle,
+    VehicleRecord,
+    VehiclesResult,
+    WalkedVehicle,
 )
-from .types import Vehicle, RateLimit, LookupResult, VehiclesResult, Usage, HealthStatus, LogEntry, LogsResult
+from .walker import DEFAULT_WALK_DELAY, walk_vehicles as _walk_vehicles
 
 VALID_STATES = {"NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT"}
+VALID_VEHICLE_TYPES = {"car", "motorcycle"}
 DEFAULT_BASE_URL = "https://api.plateapi.com.au"
 DEFAULT_TIMEOUT = 30
 MAX_RETRIES = 3
+DEFAULT_MAX_WAIT = 60.0
 INITIAL_BACKOFF = 1.0
 
 
-def _parse_vehicle(data: dict) -> Vehicle:
+def _parse_vehicle(data: Optional[dict]) -> Optional[Vehicle]:
     if not data:
         return None
     return Vehicle(
@@ -36,16 +41,51 @@ def _parse_vehicle(data: dict) -> Vehicle:
         series=data.get("series"),
         description=data.get("description"),
         detailed_description=data.get("detailed_description"),
+        vehicle_id=data.get("vehicle_id"),
     )
 
 
-def _parse_rate_limit(headers: dict) -> RateLimit:
-    raw_limit = headers.get("X-RateLimit-Limit")
-    raw_remaining = headers.get("X-RateLimit-Remaining")
+def _header_int(headers, name: str) -> Optional[int]:
+    raw = headers.get(name)
+    if raw is None or raw == "unlimited":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_rate_limit(headers) -> RateLimit:
     return RateLimit(
-        limit=int(raw_limit) if raw_limit and raw_limit != "unlimited" else None,
-        remaining=int(raw_remaining) if raw_remaining and raw_remaining != "unlimited" else None,
+        limit=_header_int(headers, "X-RateLimit-Limit"),
+        remaining=_header_int(headers, "X-RateLimit-Remaining"),
         plan=headers.get("X-RateLimit-Plan"),
+        topup_remaining=_header_int(headers, "X-Topup-Remaining"),
+    )
+
+
+def _parse_record(data: dict) -> VehicleRecord:
+    return VehicleRecord(
+        vehicle_id=data.get("vehicle_id"),
+        vehicle_type=data.get("vehicle_type"),
+        make=data.get("make"),
+        model=data.get("model"),
+        year_range=data.get("year_range"),
+        lowest_year=data.get("lowest_year"),
+        highest_year=data.get("highest_year"),
+        years=list(data.get("years") or []),
+        description=data.get("description"),
+        long_description=data.get("long_description"),
+        series=data.get("series"),
+        engine=data.get("engine"),
+        variant=data.get("variant"),
+        body=data.get("body"),
+        body_size=data.get("body_size"),
+        doors=data.get("doors"),
+        drive=data.get("drive"),
+        transmission=data.get("transmission"),
+        detail=data.get("detail"),
+        raw=data,
     )
 
 
@@ -54,122 +94,52 @@ class PlateAPI:
         self,
         api_key: str,
         base_url: str = DEFAULT_BASE_URL,
-        timeout: int = DEFAULT_TIMEOUT,
+        timeout: float = DEFAULT_TIMEOUT,
         max_retries: int = MAX_RETRIES,
+        max_wait: Optional[float] = DEFAULT_MAX_WAIT,
     ):
+        if not api_key or not isinstance(api_key, str):
+            raise ValueError("api_key must be a non-empty string")
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_retries = max_retries
-        self._session = requests.Session()
-        self._session.headers.update({
-            "X-API-Key": self.api_key,
-            "Accept": "application/json",
-        })
+        self.max_wait = max_wait
+        self._transport = Transport(
+            api_key=api_key,
+            base_url=self.base_url,
+            timeout=timeout,
+            max_retries=max_retries,
+            max_wait=max_wait,
+        )
 
-    def _request(self, method: str, path: str, params: dict = None) -> requests.Response:
-        url = f"{self.base_url}{path}"
-        last_error = None
+    # Kept for scripts that reached into 0.1.0 internals.
+    @property
+    def _session(self) -> requests.Session:
+        return self._transport.session
 
-        for attempt in range(self.max_retries + 1):
-            try:
-                response = self._session.request(
-                    method, url, params=params, timeout=self.timeout,
-                )
-            except requests.exceptions.Timeout:
-                last_error = PlateAPIError("Request timed out")
-                if attempt < self.max_retries:
-                    self._backoff(attempt)
-                    continue
-                raise last_error
-            except requests.exceptions.ConnectionError as e:
-                last_error = PlateAPIError(f"Connection failed: {e}")
-                if attempt < self.max_retries:
-                    self._backoff(attempt)
-                    continue
-                raise last_error
-
-            if response.status_code == 401:
-                raise AuthenticationError(
-                    "Invalid API key",
-                    status_code=401,
-                    response=response,
-                )
-
-            if response.status_code == 429:
-                retry_after = response.headers.get("Retry-After")
-                body = self._safe_json(response)
-                code = body.get("code", "") if body else ""
-                if code == "quota_exceeded":
-                    raise QuotaExceededError(
-                        "Monthly quota exceeded",
-                        status_code=429,
-                        code=code,
-                        response=response,
-                    )
-                if attempt < self.max_retries:
-                    wait = float(retry_after) if retry_after else self._backoff_delay(attempt)
-                    time.sleep(wait)
-                    continue
-                raise RateLimitError(
-                    "Rate limit exceeded",
-                    retry_after=float(retry_after) if retry_after else None,
-                    status_code=429,
-                    response=response,
-                )
-
-            if response.status_code >= 500:
-                retry_after = response.headers.get("Retry-After")
-                if attempt < self.max_retries:
-                    wait = float(retry_after) if retry_after else self._backoff_delay(attempt)
-                    time.sleep(wait)
-                    continue
-                raise ServerError(
-                    f"Server error ({response.status_code})",
-                    retry_after=float(retry_after) if retry_after else None,
-                    status_code=response.status_code,
-                    response=response,
-                )
-
-            if response.status_code >= 400:
-                body = self._safe_json(response)
-                message = "Request failed"
-                if body:
-                    message = body.get("detail", body.get("error", message))
-                raise PlateAPIError(
-                    message,
-                    status_code=response.status_code,
-                    response=response,
-                )
-
-            return response
-
-        raise last_error or PlateAPIError("Request failed after retries")
+    def _request(self, method: str, path: str, params: Optional[dict] = None) -> requests.Response:
+        return self._transport.request(method, path, params=params)
 
     def _backoff_delay(self, attempt: int) -> float:
-        return INITIAL_BACKOFF * (2 ** attempt) + random.uniform(0, 0.5)
+        return self._transport.backoff_delay(attempt)
 
     def _backoff(self, attempt: int):
-        time.sleep(self._backoff_delay(attempt))
+        self._transport.sleep(self._transport.backoff_delay(attempt))
 
     def _safe_json(self, response: requests.Response) -> Optional[dict]:
-        try:
-            return response.json()
-        except (ValueError, KeyError):
-            return None
+        return safe_json(response)
 
-    def lookup(
-        self,
-        plate: str,
-        state: str,
-        detailed: bool = False,
-    ) -> LookupResult:
+    # ---- lookups ----
+
+    def lookup(self, plate: str, state: str, detailed: bool = False) -> LookupResult:
         state = state.upper().strip()
         plate = plate.upper().strip()
 
         if state not in VALID_STATES:
-            raise ValueError(f"Invalid state '{state}'. Must be one of: {', '.join(sorted(VALID_STATES))}")
-
+            raise ValueError(
+                "Invalid state '%s'. Must be one of: %s" % (state, ", ".join(sorted(VALID_STATES)))
+            )
         if not plate:
             raise ValueError("Plate cannot be empty")
 
@@ -177,36 +147,57 @@ class PlateAPI:
         if detailed:
             params["detailed"] = "true"
 
-        response = self._request("GET", "/api/v1/lookup", params=params)
-        body = response.json()
-        rate_limit = _parse_rate_limit(response.headers)
-
-        vehicle = _parse_vehicle(body.get("vehicle"))
-        alternatives = [_parse_vehicle(a) for a in body.get("alternatives", []) if a]
+        attempt = 0
+        while True:
+            response = self._transport.request("GET", "/api/v1/lookup", params=params)
+            body = response.json()
+            # internal_error is a 200 that is not billed; one more try usually succeeds.
+            if (
+                body.get("success") is False
+                and body.get("code") == "internal_error"
+                and attempt < self.max_retries
+            ):
+                self._transport.sleep(self._transport.backoff_delay(attempt))
+                attempt += 1
+                continue
+            break
 
         return LookupResult(
             success=body.get("success", False),
-            vehicle=vehicle,
-            alternatives=alternatives,
+            vehicle=_parse_vehicle(body.get("vehicle")),
+            alternatives=[_parse_vehicle(a) for a in body.get("alternatives", []) if a],
             source=body.get("source"),
             duration_ms=body.get("duration_ms"),
             sandbox=body.get("sandbox", False),
             code=body.get("code"),
             error=body.get("error"),
-            request_id=body.get("request_id"),
-            rate_limit=rate_limit,
+            request_id=body.get("request_id") or response.headers.get("X-Request-ID"),
+            rate_limit=_parse_rate_limit(response.headers),
+            match=body.get("match"),
         )
+
+    # ---- vehicle database ----
 
     def vehicles(
         self,
-        make: str = None,
-        model: str = None,
-        year: int = None,
-        series: str = None,
-        engine: str = None,
-        variant: str = None,
+        make: Optional[str] = None,
+        model: Optional[str] = None,
+        year: Optional[int] = None,
+        series: Optional[str] = None,
+        engine: Optional[str] = None,
+        variant: Optional[str] = None,
+        *,
+        vehicle_type: Optional[str] = None,
     ) -> VehiclesResult:
-        params = {}
+        if vehicle_type is not None and vehicle_type not in VALID_VEHICLE_TYPES:
+            raise ValueError(
+                "Invalid vehicle_type '%s'. Must be one of: %s"
+                % (vehicle_type, ", ".join(sorted(VALID_VEHICLE_TYPES)))
+            )
+
+        params: Dict[str, str] = {}
+        if vehicle_type is not None:
+            params["type"] = vehicle_type
         if make is not None:
             params["make"] = make
         if model is not None:
@@ -220,21 +211,57 @@ class PlateAPI:
         if variant is not None:
             params["variant"] = variant
 
-        response = self._request("GET", "/api/v1/vehicles", params=params)
+        response = self._transport.request("GET", "/api/v1/vehicles", params=params)
         body = response.json()
         data_list = body.get("data", [])
-        items = data_list[0].get("data", []) if data_list else []
-        cascade_type = data_list[0].get("type") if data_list else None
+        first = data_list[0] if data_list and isinstance(data_list[0], dict) else {}
         return VehiclesResult(
             success=body.get("success", False),
-            type=cascade_type,
-            data=items,
+            type=first.get("type"),
+            data=first.get("data", []),
             total=body.get("total", 0),
             duration_ms=body.get("duration_ms"),
         )
 
+    def vehicle_by_id(self, vehicle_id) -> VehicleRecord:
+        if isinstance(vehicle_id, bool):
+            raise ValueError("vehicle_id must be an integer")
+        if isinstance(vehicle_id, str):
+            if not vehicle_id.isdigit():
+                raise ValueError("vehicle_id must be an integer")
+            vehicle_id = int(vehicle_id)
+        elif not isinstance(vehicle_id, int) or vehicle_id < 0:
+            raise ValueError("vehicle_id must be an integer")
+
+        response = self._transport.request("GET", "/api/v1/vehicles/%d" % vehicle_id)
+        body = response.json()
+        return _parse_record(body.get("vehicle") or {})
+
+    def walk_vehicles(
+        self,
+        make: str,
+        model: str,
+        *,
+        trims: bool = True,
+        year_from: Optional[int] = None,
+        year_to: Optional[int] = None,
+        engine_contains: Optional[str] = None,
+        vehicle_type: Optional[str] = None,
+        per_year: bool = False,
+        known_ids: Optional[Set[Any]] = None,
+        delay: float = DEFAULT_WALK_DELAY,
+    ) -> Iterator[WalkedVehicle]:
+        return _walk_vehicles(
+            self, make, model,
+            trims=trims, year_from=year_from, year_to=year_to,
+            engine_contains=engine_contains, vehicle_type=vehicle_type,
+            per_year=per_year, known_ids=known_ids, delay=delay,
+        )
+
+    # ---- account ----
+
     def usage(self) -> Usage:
-        response = self._request("GET", "/api/v1/keys/usage")
+        response = self._transport.request("GET", "/api/v1/keys/usage")
         body = response.json()
         return Usage(
             email=body.get("email"),
@@ -257,10 +284,10 @@ class PlateAPI:
         self,
         limit: int = 100,
         offset: int = 0,
-        since: str = None,
-        until: str = None,
-        plate: str = None,
-        success: bool = None,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        plate: Optional[str] = None,
+        success: Optional[bool] = None,
     ) -> LogsResult:
         params = {"limit": str(limit), "offset": str(offset)}
         if since:
@@ -272,12 +299,11 @@ class PlateAPI:
         if success is not None:
             params["success"] = str(success).lower()
 
-        response = self._request("GET", "/api/v1/keys/logs", params=params)
+        response = self._transport.request("GET", "/api/v1/keys/logs", params=params)
         body = response.json()
 
-        entries = []
-        for entry in body.get("logs", []):
-            entries.append(LogEntry(
+        entries = [
+            LogEntry(
                 plate=entry.get("plate"),
                 state=entry.get("state"),
                 success=entry.get("success", 0),
@@ -289,7 +315,9 @@ class PlateAPI:
                 client_ip=entry.get("client_ip"),
                 request_id=entry.get("request_id"),
                 created_at=entry.get("created_at"),
-            ))
+            )
+            for entry in body.get("logs", [])
+        ]
 
         return LogsResult(
             logs=entries,
@@ -300,20 +328,17 @@ class PlateAPI:
         )
 
     def health(self) -> HealthStatus:
-        old_headers = dict(self._session.headers)
-        self._session.headers.pop("X-API-Key", None)
-        try:
-            response = self._request("GET", "/api/v1/health")
-            body = response.json()
-            return HealthStatus(
-                status=body.get("status", "unknown"),
-                version=body.get("version"),
-            )
-        finally:
-            self._session.headers.update(old_headers)
+        response = self._transport.request("GET", "/api/v1/health", with_key=False, max_retries=0)
+        body = response.json()
+        return HealthStatus(
+            status=body.get("status", "unknown"),
+            version=body.get("version"),
+        )
+
+    # ---- lifecycle ----
 
     def close(self):
-        self._session.close()
+        self._transport.close()
 
     def __enter__(self):
         return self
